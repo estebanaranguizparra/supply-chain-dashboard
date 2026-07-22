@@ -19,6 +19,11 @@
   .card .label { font-size:13px; color:#666; margin-bottom:6px; }
   .card .value { font-size:26px; font-weight:600; }
   #chartWrap { position:relative; width:100%; height:320px; background:#fff; border:1px solid #e5e5e5; border-radius:10px; padding:16px; box-sizing:border-box; }
+  #execSummary { background:#fff; border:1px solid #e5e5e5; border-radius:10px; padding:18px 20px; margin-bottom:24px; }
+  #execSummary h2 { font-size:15px; font-weight:600; margin:0 0 12px 0; }
+  #execSummary ol { margin:0; padding-left:20px; }
+  #execSummary li { margin-bottom:10px; font-size:14px; line-height:1.5; }
+  #execSummary li:last-child { margin-bottom:0; }
   #dash { display:none; }
 </style>
 </head>
@@ -41,6 +46,10 @@
     <select id="fProv"></select>
     <select id="fCat"></select>
     <button id="reload" onclick="loadData()">Actualizar datos</button>
+  </div>
+  <div id="execSummary">
+    <h2>Resumen ejecutivo — Top 5 prioridades de la semana</h2>
+    <ol id="execList"></ol>
   </div>
   <div class="cards" id="cards"></div>
   <div id="chartWrap"><canvas id="chart"></canvas></div>
@@ -134,10 +143,77 @@ function kpiState(key, v) {
   return v < c ? 'bad' : (v < s ? 'warn' : 'good');
 }
 
+function avgBy(rows, groupKey, valueKey) {
+  const groups = {};
+  rows.forEach(r => {
+    const g = r[groupKey] || 'N/A';
+    (groups[g] = groups[g] || []).push(r[valueKey]);
+  });
+  return Object.entries(groups).map(([group, vals]) => ({
+    group,
+    avg: vals.reduce((s, v) => s + v, 0) / vals.length,
+    n: vals.length
+  }));
+}
+
+function buildExecSummary(rows) {
+  const items = [];
+  if (!rows.length) return items;
+
+  const ranked = rows.map(d => ({ ...d, score: scoreOf(d) })).sort((a, b) => b.score - a.score);
+
+  // 1. SKU con mayor score de urgencia
+  const top = ranked[0];
+  items.push(`Priorizar <strong>${top.sku}</strong> (Proveedor ${top.proveedor}): OTIF ${pctFmt(top.otif)}, backorders ${pctFmt(top.backorders)}, forecast accuracy ${pctFmt(top.forecast_accuracy)} — el SKU con mayor score de urgencia.`);
+
+  // 2. SKU crítico con backorders sobre el umbral
+  const criticos = rows.filter(d => d.critico === 'Si' && d.backorders > 0.10).sort((a, b) => b.backorders - a.backorders);
+  const critico = criticos.find(c => c.sku !== top.sku) || criticos[0];
+  if (critico) {
+    items.push(`Revisar disponibilidad del SKU crítico <strong>${critico.sku}</strong> (Proveedor ${critico.proveedor}): backorders en ${pctFmt(critico.backorders)}, muy por encima del umbral de 10%.`);
+  } else {
+    items.push(`No hay SKUs marcados como críticos con backorders sobre el 10%; mantener el monitoreo habitual de los productos críticos.`);
+  }
+
+  // 3. Proveedor con peor OTD promedio
+  const bySupplier = avgBy(rows, 'proveedor', 'supplier_otd').sort((a, b) => a.avg - b.avg);
+  if (bySupplier.length) {
+    const s = bySupplier[0];
+    items.push(`Escalar con <strong>${s.group}</strong>: OTD promedio de ${pctFmt(s.avg)} en ${s.n} SKU(s), por debajo del objetivo de 95%.`);
+  }
+
+  // 4. Categoría con peor forecast accuracy promedio
+  const byCategory = avgBy(rows, 'categoria', 'forecast_accuracy').sort((a, b) => a.avg - b.avg);
+  if (byCategory.length) {
+    const c = byCategory[0];
+    items.push(`Revisar el proceso de forecast en la categoría <strong>${c.group}</strong>: precisión promedio de ${pctFmt(c.avg)}, por debajo del objetivo de 75%.`);
+  }
+
+  // 5. KPI general más alejado de su objetivo
+  const avgOf = key => rows.reduce((s, d) => s + d[key], 0) / rows.length;
+  const gaps = [
+    { label: 'OTIF', value: avgOf('otif'), gap: 0.95 - avgOf('otif'), target: '95%' },
+    { label: 'Forecast accuracy', value: avgOf('forecast_accuracy'), gap: 0.75 - avgOf('forecast_accuracy'), target: '75%' },
+    { label: 'Supplier OTD', value: avgOf('supplier_otd'), gap: 0.95 - avgOf('supplier_otd'), target: '95%' },
+    { label: 'Backorders', value: avgOf('backorders'), gap: avgOf('backorders') - 0.05, target: '5%' },
+  ].sort((a, b) => b.gap - a.gap);
+  const worst = gaps[0];
+  if (worst.gap > 0) {
+    items.push(`A nivel general, <strong>${worst.label}</strong> está en ${pctFmt(worst.value)}, fuera del objetivo de ${worst.target}. Priorizar acciones que mejoren este indicador esta semana.`);
+  } else {
+    items.push(`Todos los KPIs generales (OTIF, forecast accuracy, backorders, supplier OTD) están dentro de rango saludable. Mantener el monitoreo semanal.`);
+  }
+
+  return items.slice(0, 5);
+}
+
 function render() {
   const prov = document.getElementById('fProv').value;
   const cat = document.getElementById('fCat').value;
   const rows = data.filter(d => (!prov || d.proveedor === prov) && (!cat || d.categoria === cat));
+
+  const execListEl = document.getElementById('execList');
+  execListEl.innerHTML = buildExecSummary(rows).map(t => `<li>${t}</li>`).join('');
 
   const cardsEl = document.getElementById('cards');
   cardsEl.innerHTML = '';

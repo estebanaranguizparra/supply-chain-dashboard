@@ -11,7 +11,8 @@
   #setup { background:#fff; border:1px solid #ddd; border-radius:10px; padding:20px; margin-bottom:24px; }
   #setup input { width:100%; padding:8px; border:1px solid #ccc; border-radius:6px; font-size:14px; box-sizing:border-box; }
   #setup button, #reload { padding:8px 16px; border-radius:6px; border:1px solid #1a1a1a; background:#1a1a1a; color:#fff; cursor:pointer; font-size:14px; margin-top:8px; }
-  #status { font-size:13px; color:#a33; margin-top:8px; }
+  #status { font-size:13px; color:#a33; margin-top:8px; line-height:1.5; }
+  #status b { color:#7a1f1f; }
   select { padding:6px 10px; border-radius:6px; border:1px solid #ccc; font-size:14px; }
   .filters { display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap; }
   .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:24px; }
@@ -86,6 +87,13 @@ function num(v, fallback) {
   return n > 1.5 ? n / 100 : n; // acepta 92 o 0.92
 }
 
+const REQUIRED_COLUMNS = ['SKU', 'Proveedor', 'OTIF', 'Forecast Accuracy', 'Backorders', 'Supplier OTD'];
+
+function missingColumns(fields) {
+  const present = new Set((fields || []).map(f => (f || '').trim()));
+  return REQUIRED_COLUMNS.filter(c => !present.has(c));
+}
+
 function loadData() {
   const url = getSheetUrl();
   const statusEl = document.getElementById('status');
@@ -98,9 +106,16 @@ function loadData() {
     download: true,
     header: true,
     complete: function(results) {
+      const missing = missingColumns(results.meta && results.meta.fields);
+      if (missing.length) {
+        statusEl.innerHTML = `No se pudo cargar el dashboard: faltan las columnas <b>${missing.join(', ')}</b> en tu Google Sheet.<br>Revisa que los encabezados sean exactamente: <b>SKU, Categoria, Proveedor, Critico, OTIF, Forecast Accuracy, Backorders, Supplier OTD</b> (Categoria y Critico son opcionales, el resto obligatorias).`;
+        document.getElementById('dash').style.display = 'none';
+        return;
+      }
       const rows = results.data.filter(r => r.SKU);
       if (!rows.length) {
         statusEl.textContent = 'No se encontraron filas. Revisa que el link sea el CSV publicado (Archivo > Compartir > Publicar en la web > CSV).';
+        document.getElementById('dash').style.display = 'none';
         return;
       }
       data = rows.map(r => ({
@@ -120,6 +135,7 @@ function loadData() {
     },
     error: function(err) {
       statusEl.textContent = 'No se pudo leer el archivo. Verifica que el link sea publico (CSV).';
+      document.getElementById('dash').style.display = 'none';
     }
   });
 }

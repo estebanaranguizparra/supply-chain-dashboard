@@ -19,6 +19,9 @@
   .card .label { font-size:13px; color:#666; margin-bottom:6px; }
   .card .value { font-size:26px; font-weight:600; }
   #chartWrap { position:relative; width:100%; height:320px; background:#fff; border:1px solid #e5e5e5; border-radius:10px; padding:16px; box-sizing:border-box; }
+  #chart { cursor:pointer; }
+  .focus-banner { grid-column:1/-1; font-size:13px; color:#333; margin-bottom:2px; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .focus-banner a { color:#1a56db; cursor:pointer; text-decoration:underline; }
   #execSummary { background:#fff; border:1px solid #e5e5e5; border-radius:10px; padding:18px 20px; margin-top:24px; }
   #execSummary h2 { font-size:15px; font-weight:600; margin:0 0 12px 0; }
   #execSummary ol { margin:0; padding-left:20px; }
@@ -61,7 +64,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script>
 const STATUS_COLOR = { good: '#0ca30c', warn: '#d99000', bad: '#d03b3b' };
-let chart, data = [];
+let chart, data = [], selectedSku = null, lastRows = [];
 
 function getSheetUrl() {
   const params = new URLSearchParams(window.location.search);
@@ -230,35 +233,84 @@ function buildExecSummary(rows) {
   return items.slice(0, 5);
 }
 
+function renderCards(rows) {
+  const cardsEl = document.getElementById('cards');
+  cardsEl.innerHTML = '';
+  const focusRow = selectedSku ? rows.find(d => d.sku === selectedSku) : null;
+
+  if (focusRow) {
+    const banner = document.createElement('div');
+    banner.className = 'focus-banner';
+    banner.innerHTML = `Mostrando <strong>${focusRow.sku}</strong> (Proveedor ${focusRow.proveedor}) — <a id="clearFocus">Ver promedio general</a>`;
+    cardsEl.appendChild(banner);
+  }
+
+  [['otif', 'OTIF'], ['forecast_accuracy', 'Forecast accuracy'], ['backorders', 'Backorders'], ['supplier_otd', 'Supplier OTD']].forEach(([key, label]) => {
+    const val = focusRow ? focusRow[key] : (rows.length ? rows.reduce((s, d) => s + d[key], 0) / rows.length : 0);
+    const st = (focusRow || rows.length) ? kpiState(key, val) : 'good';
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `<div class="label">${label}</div><div class="value" style="color:${STATUS_COLOR[st]}">${pctFmt(val)}</div>`;
+    cardsEl.appendChild(card);
+  });
+
+  if (focusRow) {
+    document.getElementById('clearFocus').onclick = () => {
+      selectedSku = null;
+      renderCards(lastRows);
+      updateChartHighlight();
+    };
+  }
+}
+
+function updateChartHighlight() {
+  if (!chart) return;
+  chart.data.datasets[0].borderColor = chart.data.labels.map(l => l === selectedSku ? '#1a1a1a' : 'transparent');
+  chart.data.datasets[0].borderWidth = chart.data.labels.map(l => l === selectedSku ? 3 : 0);
+  chart.update();
+}
+
 function render() {
   const prov = document.getElementById('fProv').value;
   const cat = document.getElementById('fCat').value;
   const rows = data.filter(d => (!prov || d.proveedor === prov) && (!cat || d.categoria === cat));
+  lastRows = rows;
+  selectedSku = null;
 
   const execListEl = document.getElementById('execList');
   execListEl.innerHTML = buildExecSummary(rows).map(it => `<li>${it.text}<div class="action">➜ <b>Acción:</b> ${it.action}</div></li>`).join('');
 
-  const cardsEl = document.getElementById('cards');
-  cardsEl.innerHTML = '';
-  [['otif', 'OTIF'], ['forecast_accuracy', 'Forecast accuracy'], ['backorders', 'Backorders'], ['supplier_otd', 'Supplier OTD']].forEach(([key, label]) => {
-    const avg = rows.length ? rows.reduce((s, d) => s + d[key], 0) / rows.length : 0;
-    const st = rows.length ? kpiState(key, avg) : 'good';
-    const card = document.createElement('div');
-    card.className = 'card';
-    card.innerHTML = `<div class="label">${label}</div><div class="value" style="color:${STATUS_COLOR[st]}">${pctFmt(avg)}</div>`;
-    cardsEl.appendChild(card);
-  });
+  renderCards(rows);
 
   const ranked = rows.map(d => ({ ...d, score: scoreOf(d) })).sort((a, b) => b.score - a.score).slice(0, 10);
   const labels = ranked.map(d => d.sku);
   const scores = ranked.map(d => Math.round(d.score * 100) / 100);
-  const colors = ranked.map(d => (d.critico === 'Si' && d.backorders > 0.10) ? STATUS_COLOR.bad : (d.score > 25 ? STATUS_COLOR.warn : STATUS_COLOR.good));
+  // Color por severidad relativa dentro del top 10 mostrado, para que la barra
+  // más alta (mayor urgencia) siempre sea la más "roja". Los SKU críticos con
+  // backorders sobre 10% se marcan en rojo sin importar su posición.
+  const colors = ranked.map((d, i) => {
+    if (d.critico === 'Si' && d.backorders > 0.10) return STATUS_COLOR.bad;
+    if (i < 3) return STATUS_COLOR.bad;
+    if (i < 7) return STATUS_COLOR.warn;
+    return STATUS_COLOR.good;
+  });
 
   if (chart) chart.destroy();
   chart = new Chart(document.getElementById('chart'), {
     type: 'bar',
-    data: { labels, datasets: [{ label: 'Score de urgencia', data: scores, backgroundColor: colors, borderRadius: 4 }] },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+    data: { labels, datasets: [{ label: 'Score de urgencia', data: scores, backgroundColor: colors, borderRadius: 4, borderWidth: 0 }] },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      onClick: (evt, elements) => {
+        if (!elements.length) return;
+        const sku = labels[elements[0].index];
+        selectedSku = (selectedSku === sku) ? null : sku;
+        renderCards(lastRows);
+        updateChartHighlight();
+      }
+    }
   });
 }
 

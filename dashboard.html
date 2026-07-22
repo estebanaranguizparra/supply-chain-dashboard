@@ -55,7 +55,7 @@
   <div class="cards" id="cards"></div>
   <div id="chartWrap"><canvas id="chart"></canvas></div>
   <div id="execSummary">
-    <h2>Resumen ejecutivo — Top 5 prioridades de la semana</h2>
+    <h2 id="execTitle">Resumen ejecutivo — Top 5 prioridades de la semana</h2>
     <ol id="execList"></ol>
   </div>
 </div>
@@ -233,6 +233,57 @@ function buildExecSummary(rows) {
   return items.slice(0, 5);
 }
 
+function buildSkuSummary(row) {
+  const metrics = [
+    { key: 'otif', label: 'OTIF', target: '95%', weight: (1 - row.otif) * 35 },
+    { key: 'forecast_accuracy', label: 'Forecast accuracy', target: '75%', weight: (1 - row.forecast_accuracy) * 25 },
+    { key: 'backorders', label: 'Backorders', target: '5%', weight: row.backorders * 25 },
+    { key: 'supplier_otd', label: 'Supplier OTD', target: '95%', weight: (1 - row.supplier_otd) * 15 },
+  ].map(m => ({ ...m, state: kpiState(m.key, row[m.key]), value: row[m.key] }));
+
+  const actionFor = (m) => {
+    switch (m.key) {
+      case 'otif': return `Revisar si el problema de OTIF en <b>${row.sku}</b> es de disponibilidad (inventario) o de cumplimiento logístico (transporte/despacho), y coordinar con <b>${row.proveedor}</b> según corresponda.`;
+      case 'forecast_accuracy': return `Revisar con el equipo comercial los supuestos de demanda usados para planificar <b>${row.sku}</b> y ajustar el forecast.`;
+      case 'backorders': return `Contactar a <b>${row.proveedor}</b> para acelerar el pedido pendiente de <b>${row.sku}</b>; evaluar una fuente alternativa si el backorder persiste.`;
+      case 'supplier_otd': return `Escalar con <b>${row.proveedor}</b> el cumplimiento de plazos de entrega de <b>${row.sku}</b> y solicitar un plan de mejora.`;
+    }
+  };
+
+  const issues = metrics.filter(m => m.state !== 'good').sort((a, b) => b.weight - a.weight);
+  const items = issues.map(m => ({
+    text: `<strong>${m.label}</strong> en ${pctFmt(m.value)}, ${m.key === 'backorders' ? 'por encima' : 'por debajo'} del objetivo de ${m.target}.`,
+    action: actionFor(m)
+  }));
+
+  if (row.critico === 'Si') {
+    items.unshift({
+      text: `<strong>${row.sku}</strong> está marcado como SKU crítico — cualquier quiebre de stock tiene alto impacto en el servicio.`,
+      action: `Priorizar la reposición de <b>${row.sku}</b> por sobre SKUs no críticos con score de urgencia similar.`
+    });
+  }
+
+  if (!items.length) {
+    items.push({
+      text: `<strong>${row.sku}</strong> (Proveedor ${row.proveedor}) está dentro de rango saludable en sus 4 KPIs.`,
+      action: `No se requiere acción correctiva; mantener el monitoreo habitual.`
+    });
+  }
+
+  return items.slice(0, 5);
+}
+
+function renderExecSummary(rows) {
+  const execListEl = document.getElementById('execList');
+  const titleEl = document.getElementById('execTitle');
+  const focusRow = selectedSku ? rows.find(d => d.sku === selectedSku) : null;
+  const list = focusRow ? buildSkuSummary(focusRow) : buildExecSummary(rows);
+  titleEl.textContent = focusRow
+    ? `Plan de acción — ${focusRow.sku} (Proveedor ${focusRow.proveedor})`
+    : 'Resumen ejecutivo — Top 5 prioridades de la semana';
+  execListEl.innerHTML = list.map(it => `<li>${it.text}<div class="action">➜ <b>Acción:</b> ${it.action}</div></li>`).join('');
+}
+
 function renderCards(rows) {
   const cardsEl = document.getElementById('cards');
   cardsEl.innerHTML = '';
@@ -258,6 +309,7 @@ function renderCards(rows) {
     document.getElementById('clearFocus').onclick = () => {
       selectedSku = null;
       renderCards(lastRows);
+      renderExecSummary(lastRows);
       updateChartHighlight();
     };
   }
@@ -277,9 +329,7 @@ function render() {
   lastRows = rows;
   selectedSku = null;
 
-  const execListEl = document.getElementById('execList');
-  execListEl.innerHTML = buildExecSummary(rows).map(it => `<li>${it.text}<div class="action">➜ <b>Acción:</b> ${it.action}</div></li>`).join('');
-
+  renderExecSummary(rows);
   renderCards(rows);
 
   const ranked = rows.map(d => ({ ...d, score: scoreOf(d) })).sort((a, b) => b.score - a.score).slice(0, 10);
@@ -308,6 +358,7 @@ function render() {
         const sku = labels[elements[0].index];
         selectedSku = (selectedSku === sku) ? null : sku;
         renderCards(lastRows);
+        renderExecSummary(lastRows);
         updateChartHighlight();
       }
     }

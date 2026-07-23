@@ -2,12 +2,368 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<title>Supply Chain Decision Toolkit — Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Supply Chain Dashboard — Prioriza tus SKU antes de que se conviertan en un problema</title>
+<meta name="description" content="Dashboard en vivo conectado a tu Google Sheet: te muestra qué SKU necesitan atención esta semana y qué hacer primero.">
 <script>
-  location.replace('/dashboard.html' + window.location.search);
+  // Compatibilidad con links antiguos tipo urgesku.com/?sheet=... : van directo al dashboard.
+  if (new URLSearchParams(window.location.search).has('sheet')) {
+    location.replace('/dashboard.html' + window.location.search);
+  }
 </script>
+<style>
+  :root {
+    --ink: #1a1a1a;
+    --muted: #666;
+    --muted2: #777;
+    --bg: #fafafa;
+    --card: #fff;
+    --border: #e5e5e5;
+    --border2: #ddd;
+    --link: #1a56db;
+    --good: #0ca30c;
+    --warn: #d99000;
+    --bad: #d03b3b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+    margin: 0;
+    color: var(--ink);
+    background: var(--bg);
+    line-height: 1.5;
+  }
+  a { color: var(--link); }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+
+  /* Nav */
+  nav {
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(250,250,250,0.92);
+    backdrop-filter: blur(6px);
+    border-bottom: 1px solid var(--border);
+  }
+  nav .wrap { display: flex; align-items: center; justify-content: space-between; padding-top: 14px; padding-bottom: 14px; }
+  .brand { font-weight: 700; font-size: 16px; color: var(--ink); text-decoration: none; }
+  .brand span { color: var(--muted); font-weight: 400; }
+  .navlinks { display: flex; align-items: center; gap: 20px; font-size: 14px; }
+  .navlinks a:not(.btn) { color: var(--ink); text-decoration: none; }
+  .navlinks a:not(.btn):hover { color: var(--link); }
+
+  .btn {
+    display: inline-block; padding: 10px 18px; border-radius: 8px; font-size: 14px;
+    font-weight: 600; text-decoration: none; cursor: pointer; border: 1px solid var(--ink);
+  }
+  .btn-primary { background: var(--ink); color: #fff; }
+  .btn-primary:hover { background: #000; }
+  .btn-ghost { background: transparent; color: var(--ink); }
+  .btn-ghost:hover { background: var(--border); }
+
+  /* Hero */
+  header.hero { padding: 72px 0 56px; }
+  header.hero h1 { font-size: 34px; line-height: 1.25; margin: 0 0 18px; max-width: 720px; }
+  header.hero .lead { font-size: 17px; color: var(--muted); max-width: 640px; margin: 0 0 28px; }
+  .cta-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+  .fineprint { font-size: 13px; color: var(--muted2); margin-top: 10px; }
+
+  section { padding: 48px 0; border-top: 1px solid var(--border); }
+  section h2 { font-size: 22px; margin: 0 0 8px; }
+  section .section-lead { color: var(--muted); font-size: 15px; margin: 0 0 28px; max-width: 640px; }
+
+  .grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
+  .card h3 { font-size: 15px; margin: 0 0 8px; }
+  .card p { font-size: 14px; color: var(--muted); margin: 0; }
+  .card .num { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: var(--ink); color: #fff; font-size: 13px; font-weight: 700; margin-bottom: 12px; }
+
+  /* Guía detallada */
+  .steps { counter-reset: step; }
+  .step { display: flex; gap: 16px; padding: 20px 0; border-top: 1px solid var(--border); }
+  .step:first-child { border-top: none; padding-top: 0; }
+  .step .marker {
+    flex: none; width: 30px; height: 30px; border-radius: 50%; background: var(--ink); color: #fff;
+    display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700;
+  }
+  .step .body h3 { margin: 2px 0 6px; font-size: 15px; }
+  .step .body p, .step .body li { font-size: 14px; color: var(--muted); }
+  .step .body ol, .step .body ul { margin: 8px 0; padding-left: 20px; }
+  .step .body ul.rules li { margin-bottom: 4px; }
+  code.inline { background: #f2f2f2; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+  pre.codeblock {
+    background: #f2f2f2; border: 1px solid var(--border2); border-radius: 8px;
+    padding: 12px 14px; font-size: 13px; overflow-x: auto; margin: 10px 0;
+  }
+  pre.codeblock code { font-family: "SF Mono", Consolas, monospace; }
+
+  .callout {
+    background: #fff8e6; border: 1px solid #f0dfa8; border-radius: 10px;
+    padding: 16px 18px; font-size: 14px; color: #6b5715; margin-top: 20px;
+  }
+  .callout b { color: #4a3b0d; }
+
+  /* Privacidad */
+  .privacy-box { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 22px 24px; }
+  .privacy-box p { font-size: 14px; color: var(--muted); margin: 0 0 12px; }
+  .privacy-box p:last-child { margin-bottom: 0; }
+
+  /* Planes */
+  .plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; }
+  .plan { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 26px; display: flex; flex-direction: column; }
+  .plan.pro { border-color: var(--ink); }
+  .plan .tag { font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted2); margin-bottom: 6px; }
+  .plan .price { font-size: 28px; font-weight: 700; margin: 0 0 4px; }
+  .plan .price span { font-size: 14px; font-weight: 400; color: var(--muted); }
+  .plan ul { list-style: none; padding: 0; margin: 18px 0 22px; font-size: 14px; flex: 1; }
+  .plan ul li { padding: 7px 0; border-top: 1px solid var(--border); color: var(--ink); }
+  .plan ul li:first-child { border-top: none; }
+  .trial-note { text-align: center; font-size: 13px; color: var(--muted2); margin-top: 18px; }
+
+  /* FAQ */
+  .faq-item { border-top: 1px solid var(--border); padding: 18px 0; }
+  .faq-item:first-child { border-top: none; }
+  .faq-item h3 { font-size: 15px; margin: 0 0 6px; }
+  .faq-item p { font-size: 14px; color: var(--muted); margin: 0; }
+
+  footer { border-top: 1px solid var(--border); padding: 36px 0 48px; }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: center; font-size: 13px; color: var(--muted2); }
+  footer a { color: var(--muted2); }
+
+  @media (max-width: 640px) {
+    .navlinks { gap: 12px; }
+    .navlinks .hide-mobile { display: none; }
+    header.hero h1 { font-size: 27px; }
+  }
+</style>
 </head>
 <body>
-<p>Redirigiendo al dashboard... si no ocurre automáticamente, <a href="/dashboard.html">haz clic aquí</a>.</p>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="/">urgesku<span>.com</span></a>
+    <div class="navlinks">
+      <a class="hide-mobile" href="#como-funciona">Cómo funciona</a>
+      <a class="hide-mobile" href="#privacidad">Privacidad</a>
+      <a class="hide-mobile" href="#planes">Planes</a>
+      <a class="hide-mobile" href="#faq">FAQ</a>
+      <a class="btn btn-primary" href="/dashboard.html">Ir al dashboard →</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <h1>¿Sabes exactamente qué SKU vas a quebrar esta semana?</h1>
+    <p class="lead">
+      La mayoría de los equipos de operaciones revisa el inventario en una planilla gigante,
+      ordenada por nombre o por categoría — no por urgencia real. El resultado: los problemas se
+      detectan cuando el cliente ya reclamó, o cuando el pedido de backorder lleva dos semanas de
+      atraso. No es falta de datos; es falta de una forma rápida de ver <strong>cuál de esos datos
+      importa hoy</strong>.
+    </p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="/dashboard.html">Conectar mi Google Sheet</a>
+      <a class="btn btn-ghost" href="#como-funciona">Ver cómo funciona</a>
+    </div>
+    <p class="fineprint">No se instala nada. Tus datos nunca pasan por nuestros servidores — el dashboard lee directamente desde tu Google Sheet hacia tu navegador.</p>
+  </div>
+</header>
+
+<section id="que-hace">
+  <div class="wrap">
+    <h2>Qué hace por ti</h2>
+    <p class="section-lead">Un dashboard en vivo que toma los datos que ya tienes en tu Google Sheet (OTIF, forecast accuracy, backorders, cumplimiento de proveedores) y hace tres cosas que una planilla no hace sola.</p>
+    <div class="grid3">
+      <div class="card">
+        <div class="num">1</div>
+        <h3>Ranking de urgencia por SKU</h3>
+        <p>Calcula un score de urgencia por SKU y te muestra, ordenados, cuáles necesitan atención esta semana — no los 200 SKU juntos.</p>
+      </div>
+      <div class="card">
+        <div class="num">2</div>
+        <h3>Plan de acción, no solo números</h3>
+        <p>Resumen ejecutivo con una acción concreta para cada prioridad ("escala con este proveedor", "revisa este forecast"), y cambia según el SKU que selecciones.</p>
+      </div>
+      <div class="card">
+        <div class="num">3</div>
+        <h3>Se actualiza solo</h3>
+        <p>Editas tu Google Sheet, haces clic en "Actualizar datos" y el dashboard refleja tu información más reciente. Sin archivos que reenviar por correo.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="como-funciona">
+  <div class="wrap">
+    <h2>Cómo funciona</h2>
+    <p class="section-lead">Tres pasos en resumen — más abajo tienes la guía detallada con cada clic.</p>
+    <div class="grid3" style="margin-bottom: 40px;">
+      <div class="card">
+        <div class="num">1</div>
+        <h3>Copia tu inventario a la plantilla</h3>
+        <p>Columnas ya definidas: SKU, proveedor, OTIF, forecast accuracy, backorders, supplier OTD, y si es crítico o no.</p>
+      </div>
+      <div class="card">
+        <div class="num">2</div>
+        <h3>Publica la hoja como CSV</h3>
+        <p>Desde Google Sheets, en 2 clics — te lo explicamos paso a paso abajo.</p>
+      </div>
+      <div class="card">
+        <div class="num">3</div>
+        <h3>Abre tu dashboard</h3>
+        <p>Queda guardado como un link único que puedes dejar de marcador en tu navegador.</p>
+      </div>
+    </div>
+
+    <h3 style="font-size:17px; margin-bottom:4px;">Guía detallada paso a paso</h3>
+    <p class="section-lead" style="margin-bottom:20px;">No necesitas instalar nada ni saber programar: solo una cuenta de Google.</p>
+
+    <div class="steps">
+      <div class="step">
+        <div class="marker">1</div>
+        <div class="body">
+          <h3>Descarga la plantilla</h3>
+          <p>Descarga el archivo <code class="inline">Plantilla_Supply_Chain_Dashboard.csv</code> que te entregamos. Contiene las columnas exactas que el dashboard necesita, con datos de ejemplo para que veas el formato esperado.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="marker">2</div>
+        <div class="body">
+          <h3>Impórtala a Google Sheets</h3>
+          <ol>
+            <li>Entra a sheets.google.com y crea una hoja en blanco.</li>
+            <li>Ve a Archivo &gt; Importar &gt; Subir, selecciona el archivo CSV descargado y elige "Reemplazar hoja actual".</li>
+            <li>Verás las 8 columnas ya cargadas: SKU, Categoria, Proveedor, Critico, OTIF, Forecast Accuracy, Backorders, Supplier OTD.</li>
+          </ol>
+        </div>
+      </div>
+      <div class="step">
+        <div class="marker">3</div>
+        <div class="body">
+          <h3>Reemplaza los datos de ejemplo con los tuyos</h3>
+          <p>Borra las filas de ejemplo y carga tus propios SKU, respetando estas reglas de formato:</p>
+          <ul class="rules">
+            <li><b>SKU:</b> código o nombre del producto (obligatorio).</li>
+            <li><b>Proveedor:</b> nombre del proveedor (obligatorio).</li>
+            <li><b>Categoria:</b> familia o categoría del producto (opcional; vacío se agrupa como "General").</li>
+            <li><b>Critico:</b> "Si" o "No" (opcional; vacío se asume "No").</li>
+            <li><b>OTIF, Forecast Accuracy, Supplier OTD:</b> como porcentaje, por ejemplo 92 o 0.92 (obligatorias).</li>
+            <li><b>Backorders:</b> porcentaje de pedidos pendientes sobre el total, por ejemplo 5 o 0.05 (obligatoria).</li>
+          </ul>
+          <p>Si falta alguna columna obligatoria o el encabezado no coincide exactamente, el dashboard te muestra un aviso indicando cuál falta, en vez de mostrar información incorrecta.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="marker">4</div>
+        <div class="body">
+          <h3>Publica la hoja como CSV</h3>
+          <ol>
+            <li>En Google Sheets, ve a Archivo &gt; Compartir &gt; Publicar en la web.</li>
+            <li>En "Vincular", elige la hoja con tus datos; en el formato, selecciona "Valores separados por comas (.csv)".</li>
+            <li>Haz clic en Publicar y copia el enlace que se genera.</li>
+          </ol>
+        </div>
+      </div>
+      <div class="step">
+        <div class="marker">5</div>
+        <div class="body">
+          <h3>Arma el enlace final de tu dashboard</h3>
+          <p>Pega el enlace del CSV publicado a continuación del parámetro <code class="inline">sheet=</code> en esta dirección:</p>
+          <pre class="codeblock"><code>https://urgesku.com/dashboard.html?sheet=TU-ENLACE-CSV-AQUI</code></pre>
+          <p>Guarda esa dirección completa como marcador en tu navegador. Cada vez que la abras verás tu dashboard actualizado con los datos que tengas en ese momento en la hoja. Si editas la hoja de Google, solo debes hacer clic en "Actualizar datos" dentro del dashboard — no necesitas volver a publicar ni generar un enlace nuevo.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="callout">
+      <b>¿Dudas o problemas armando tu link?</b> Escríbenos a
+      <a href="mailto:esteban.aranguiz.parra@gmail.com">esteban.aranguiz.parra@gmail.com</a>
+      y te ayudamos a dejar tu dashboard funcionando.
+    </div>
+  </div>
+</section>
+
+<section id="privacidad">
+  <div class="wrap">
+    <h2>Privacidad y seguridad</h2>
+    <p class="section-lead">Lo que debes saber antes de conectar tus datos.</p>
+    <div class="privacy-box">
+      <p>Para que el dashboard pueda leer tu información automáticamente, la hoja debe publicarse con el enlace CSV accesible sin necesidad de iniciar sesión. Esto significa que cualquier persona que llegue a tener ese enlace exacto podría ver los datos de tu planilla (SKU, proveedores, niveles de servicio), aunque nadie pueda adivinarlo por sí solo: es una dirección larga y única que solo conocen quienes tú compartas.</p>
+      <p><b>Ningún dato pasa ni se guarda en nuestros servidores</b> — todo se lee directamente desde tu Google Sheet hacia tu propio navegador.</p>
+      <p>Recomendamos tratar ese enlace con la misma discreción que una contraseña: no publicarlo en sitios abiertos ni canales públicos, y compartirlo solo con las personas de tu equipo que deban ver el dashboard. Si en algún momento quieres cortar el acceso, basta con volver a Archivo &gt; Compartir &gt; Publicar en la web en Google Sheets y detener la publicación; el enlace anterior deja de funcionar de inmediato.</p>
+    </div>
+  </div>
+</section>
+
+<section id="para-quien">
+  <div class="wrap">
+    <h2>¿Para quién es esto?</h2>
+    <p class="section-lead" style="margin-bottom:0;">
+      Para pymes y equipos de operaciones/compras que ya llevan sus KPIs de inventario en una
+      planilla, pero pierden tiempo revisándola línea por línea para saber qué priorizar. Si tu
+      problema es que <strong>no tienes ningún dato</strong>, este no es tu producto todavía —
+      primero necesitas empezar a medir OTIF, forecast accuracy y backorders (te podemos orientar
+      igual, <a href="mailto:esteban.aranguiz.parra@gmail.com">escríbenos</a>).
+    </p>
+  </div>
+</section>
+
+<section id="planes">
+  <div class="wrap">
+    <h2>Planes</h2>
+    <p class="section-lead">Ambos incluyen 7 días de prueba gratis.</p>
+    <div class="plans">
+      <div class="plan">
+        <div class="tag">Básico</div>
+        <p class="price">USD 9<span>/mes</span></p>
+        <ul>
+          <li>Dashboard conectado a tu Google Sheet</li>
+          <li>Plantilla lista para usar</li>
+          <li>Guía de configuración paso a paso</li>
+          <li>Soporte por correo</li>
+        </ul>
+        <a class="btn btn-ghost" style="text-align:center" href="mailto:esteban.aranguiz.parra@gmail.com?subject=Quiero%20el%20plan%20B%C3%A1sico%20de%20Supply%20Chain%20Dashboard">Escríbenos para activar tu plan</a>
+      </div>
+      <div class="plan pro">
+        <div class="tag">Pro</div>
+        <p class="price">USD 19<span>/mes</span></p>
+        <ul>
+          <li>Todo lo del plan Básico</li>
+          <li>Ayuda personalizada para migrar tu inventario actual</li>
+          <li>Protección con contraseña para el link</li>
+          <li>Soporte prioritario (respuesta en menos de 24h)</li>
+          <li>Hasta 3 dashboards (por bodega, línea o cliente)</li>
+        </ul>
+        <a class="btn btn-primary" style="text-align:center" href="mailto:esteban.aranguiz.parra@gmail.com?subject=Quiero%20el%20plan%20Pro%20de%20Supply%20Chain%20Dashboard">Escríbenos para activar tu plan</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap">
+    <h2>Preguntas frecuentes</h2>
+    <div class="faq-item">
+      <h3>¿Mis datos quedan expuestos?</h3>
+      <p>Tu Google Sheet se comparte como "cualquiera con el enlace puede ver", que es lo que permite que el dashboard lo lea automáticamente. Nadie puede adivinar ese enlace por sí solo, pero te recomendamos tratarlo con la misma discreción que una contraseña. Ningún dato pasa por nuestros servidores.</p>
+    </div>
+    <div class="faq-item">
+      <h3>¿Cuántos SKU soporta?</h3>
+      <p>No hay límite práctico — lo probamos con 1.500 SKU sin problemas de velocidad.</p>
+    </div>
+    <div class="faq-item">
+      <h3>¿Necesito saber programar?</h3>
+      <p>No. Si sabes usar Google Sheets, sabes usar esto.</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div>Supply Chain Decision Toolkit — Live Dashboard</div>
+    <div>Dudas o soporte: <a href="mailto:esteban.aranguiz.parra@gmail.com">esteban.aranguiz.parra@gmail.com</a></div>
+    <div><a href="/dashboard.html">Ir al dashboard →</a></div>
+  </div>
+</footer>
+
 </body>
 </html>

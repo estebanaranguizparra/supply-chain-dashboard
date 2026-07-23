@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Constructor de datos — Supply Chain Dashboard</title>
+<meta name="description" content="Calcula tus KPIs de Supply Chain (OTIF, Backorders, Supplier OTD) desde tus propios pedidos, y arma tu primer forecast — sin instalar nada, sin subir datos a ningún servidor.">
+<style>
+  :root {
+    --ink: #1a1a1a; --muted: #666; --muted2: #777;
+    --bg: #fafafa; --card: #fff; --border: #e5e5e5; --border2: #ddd;
+    --link: #1a56db; --good: #0ca30c; --warn: #d99000; --bad: #d03b3b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+    margin: 0; color: var(--ink); background: var(--bg); line-height: 1.5;
+  }
+  a { color: var(--link); }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 24px; }
+
+  nav {
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(250,250,250,0.92); backdrop-filter: blur(6px);
+    border-bottom: 1px solid var(--border);
+  }
+  nav .wrap { display: flex; align-items: center; justify-content: space-between; padding: 14px 24px; }
+  .brand { font-weight: 700; font-size: 16px; color: var(--ink); text-decoration: none; }
+  .brand span { color: var(--muted); font-weight: 400; }
+  .navlinks { display: flex; align-items: center; gap: 16px; font-size: 14px; }
+  .navlinks a:not(.btn) { color: var(--ink); text-decoration: none; }
+  .navlinks a:not(.btn):hover { color: var(--link); }
+
+  .btn {
+    display: inline-block; padding: 9px 16px; border-radius: 8px; font-size: 14px;
+    font-weight: 600; text-decoration: none; cursor: pointer; border: 1px solid var(--ink);
+    background: transparent; color: var(--ink);
+  }
+  .btn-primary { background: var(--ink); color: #fff; }
+  .btn-primary:hover { background: #000; }
+  .btn-ghost:hover { background: var(--border); }
+  .btn-sm { padding: 5px 10px; font-size: 12px; }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+
+  header.hero { padding: 48px 0 32px; border-bottom: 1px solid var(--border); }
+  header.hero h1 { font-size: 28px; margin: 0 0 14px; }
+  header.hero p { font-size: 15px; color: var(--muted); max-width: 700px; margin: 0 0 8px; }
+
+  section { padding: 44px 0; border-bottom: 1px solid var(--border); }
+  section h2 { font-size: 21px; margin: 0 0 6px; }
+  .tool-lead { font-size: 14px; color: var(--muted); max-width: 680px; margin: 0 0 6px; }
+  .principle {
+    background: #fff8e6; border: 1px solid #f0dfa8; border-radius: 10px;
+    padding: 14px 16px; font-size: 13.5px; color: #6b5715; margin: 16px 0 24px; max-width: 680px;
+  }
+  .principle b { color: #4a3b0d; }
+
+  .table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
+  table.editable { border-collapse: collapse; width: 100%; min-width: 760px; font-size: 13px; }
+  table.editable th {
+    text-align: left; font-size: 12px; color: var(--muted2); font-weight: 600;
+    padding: 10px 8px; border-bottom: 1px solid var(--border); white-space: nowrap;
+  }
+  table.editable td { padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  table.editable tr:last-child td { border-bottom: none; }
+  table.editable input, table.editable select {
+    width: 100%; min-width: 90px; padding: 6px 7px; border: 1px solid var(--border2);
+    border-radius: 6px; font-size: 13px; font-family: inherit;
+  }
+  table.editable td.del { width: 34px; text-align: center; }
+  .del-btn { border: none; background: none; color: var(--bad); font-size: 16px; cursor: pointer; padding: 4px; }
+
+  .toolbar { display: flex; gap: 10px; align-items: center; margin: 14px 0 6px; flex-wrap: wrap; }
+
+  .results { margin-top: 26px; }
+  .results h3 { font-size: 15px; margin: 0 0 10px; }
+  .note { font-size: 13px; color: var(--muted); margin: 4px 0 0; }
+  .note.warn { color: #a3690c; }
+
+  .out-table { border-collapse: collapse; width: 100%; font-size: 13px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .out-table th { text-align: left; font-size: 12px; color: var(--muted2); font-weight: 600; padding: 9px 10px; background: #f4f4f4; border-bottom: 1px solid var(--border); }
+  .out-table td { padding: 9px 10px; border-bottom: 1px solid var(--border); }
+  .out-table tr:last-child td { border-bottom: none; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+  .pill.good { background: #e6f6e6; color: var(--good); }
+  .pill.warn { background: #fdf0dc; color: var(--warn); }
+  .pill.bad { background: #fbe4e4; color: var(--bad); }
+  .pill.nd { background: #eee; color: var(--muted); }
+
+  .forecast-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; margin-bottom: 12px; }
+  .forecast-card h4 { margin: 0 0 6px; font-size: 14px; }
+  .forecast-card .big { font-size: 20px; font-weight: 700; }
+  .forecast-card p { font-size: 13px; color: var(--muted); margin: 4px 0 0; }
+
+  .empty-state { font-size: 13px; color: var(--muted2); padding: 18px; text-align: center; }
+
+  footer { padding: 30px 0 46px; }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; font-size: 13px; color: var(--muted2); }
+  footer a { color: var(--muted2); }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="/">urgesku<span>.com</span></a>
+    <div class="navlinks">
+      <a href="/#planes">Planes</a>
+      <a class="btn btn-primary" href="/dashboard.html">Ir al dashboard →</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <h1>Constructor de datos</h1>
+    <p>
+      Si todavía no tienes tus KPIs calculados, esto es para ti. Son dos calculadoras
+      simples: la primera arma <b>OTIF, Backorders y Supplier OTD</b> a partir de tus
+      propios pedidos y entregas; la segunda te ayuda a armar tu <b>primer forecast</b>
+      cuando nunca has hecho uno. Todo corre en tu navegador — nada de lo que escribas
+      aquí se envía a ningún servidor.
+    </p>
+  </div>
+</header>
+
+<section id="kpis">
+  <div class="wrap">
+    <h2>1. Calcula tus KPIs desde tus pedidos</h2>
+    <p class="tool-lead">Ingresa cada pedido que tengas registrado (de una planilla, facturas o guías de despacho). Con las fechas y cantidades, esta calculadora arma OTIF, Backorders y Supplier OTD por SKU.</p>
+
+    <div class="principle">
+      <b>Cómo maneja los datos faltantes:</b> si un pedido no tiene fecha real de entrega
+      (porque aún no llega), esta calculadora <b>no adivina</b> si llegó a tiempo — lo
+      excluye del cálculo de OTIF y Supplier OTD para ese SKU, y te avisa cuántos pedidos
+      quedaron afuera y por qué. Nunca vas a ver un KPI inventado.
+    </div>
+
+    <div class="table-scroll">
+      <table class="editable" id="ordersTable">
+        <thead>
+          <tr>
+            <th>SKU</th>
+            <th>Proveedor</th>
+            <th>Categoría</th>
+            <th>Crítico</th>
+            <th>Cant. pedida</th>
+            <th>Cant. recibida</th>
+            <th>Fecha comprometida</th>
+            <th>Fecha real de entrega</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="ordersBody"></tbody>
+      </table>
+    </div>
+    <div class="toolbar">
+      <button class="btn btn-ghost" id="addOrderRow">+ Agregar pedido</button>
+      <button class="btn btn-primary" id="calcKpis">Calcular KPIs</button>
+    </div>
+
+    <div class="results" id="kpiResults"></div>
+  </div>
+</section>
+
+<section id="forecast">
+  <div class="wrap">
+    <h2>2. Arma tu primer forecast</h2>
+    <p class="tool-lead">Si nunca has hecho un forecast, no hay nada que calcular hacia atrás — Forecast Accuracy compara un pronóstico hecho <i>antes</i> del período contra la demanda real <i>después</i>. Esta calculadora te ayuda a empezar hoy con un método simple: promedio móvil.</p>
+
+    <div class="principle">
+      <b>Esto no te dice tu "forecast accuracy histórico"</b> — ese dato no existe si nunca
+      forecasteaste. Lo que hace es proponerte el forecast del próximo período según tu
+      historial reciente, para que dentro de unas semanas, comparando ese forecast contra
+      lo que realmente vendas, recién ahí tengas un Forecast Accuracy real que medir.
+    </div>
+
+    <div class="table-scroll">
+      <table class="editable" id="demandTable">
+        <thead>
+          <tr>
+            <th style="min-width:120px">SKU</th>
+            <th style="min-width:140px">Período (en orden, el más antiguo primero)</th>
+            <th style="min-width:120px">Demanda real (unidades)</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="demandBody"></tbody>
+      </table>
+    </div>
+    <div class="toolbar">
+      <button class="btn btn-ghost" id="addDemandRow">+ Agregar período</button>
+      <label style="font-size:13px; color:var(--muted); display:flex; align-items:center; gap:6px;">
+        Usar los últimos
+        <select id="windowN" style="padding:5px 8px; border:1px solid var(--border2); border-radius:6px;">
+          <option value="4">4</option>
+          <option value="6">6</option>
+          <option value="8">8</option>
+        </select>
+        períodos para el promedio
+      </label>
+      <button class="btn btn-primary" id="calcForecast">Calcular forecast</button>
+    </div>
+
+    <div class="results" id="forecastResults"></div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div>Supply Chain Decision Toolkit — Constructor de datos</div>
+    <div>Dudas o soporte: <a href="mailto:esteban.aranguiz.parra@gmail.com">esteban.aranguiz.parra@gmail.com</a></div>
+    <div><a href="/">← Volver al inicio</a></div>
+  </div>
+</footer>
+
+<script>
+/* ---------- Utilidades ---------- */
+function el(tag, attrs, children) {
+  const node = document.createElement(tag);
+  Object.entries(attrs || {}).forEach(([k, v]) => {
+    if (k === 'text') node.textContent = v;
+    else if (k === 'html') node.innerHTML = v;
+    else node.setAttribute(k, v);
+  });
+  (children || []).forEach(c => node.appendChild(c));
+  return node;
+}
+function pctFmt(v) { return (Math.round(v * 1000) / 10).toFixed(1) + '%'; }
+function csvEscape(v) {
+  v = String(v == null ? '' : v);
+  return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+}
+function downloadCsv(filename, rows) {
+  const csv = rows.map(r => r.map(csvEscape).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = el('a', { href: url, download: filename });
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+function copyText(text, btn) {
+  navigator.clipboard.writeText(text).then(() => {
+    const original = btn.textContent;
+    btn.textContent = 'Copiado ✓';
+    setTimeout(() => { btn.textContent = original; }, 1500);
+  });
+}
+
+/* ---------- Tabla de pedidos (KPI Builder) ---------- */
+function addOrderRow(vals) {
+  vals = vals || {};
+  const tr = el('tr');
+  tr.innerHTML = `
+    <td><input type="text" class="f-sku" placeholder="Ej: SKU-002" value="${vals.sku || ''}"></td>
+    <td><input type="text" class="f-prov" placeholder="Proveedor A" value="${vals.prov || ''}"></td>
+    <td><input type="text" class="f-cat" placeholder="General" value="${vals.cat || ''}"></td>
+    <td><select class="f-crit"><option value="No">No</option><option value="Si">Si</option></select></td>
+    <td><input type="number" class="f-pedida" min="0" placeholder="0" value="${vals.pedida || ''}"></td>
+    <td><input type="number" class="f-recibida" min="0" placeholder="0" value="${vals.recibida || ''}"></td>
+    <td><input type="date" class="f-fcomp" value="${vals.fcomp || ''}"></td>
+    <td><input type="date" class="f-freal" value="${vals.freal || ''}"></td>
+    <td class="del"><button class="del-btn" title="Eliminar pedido">✕</button></td>
+  `;
+  if (vals.crit) tr.querySelector('.f-crit').value = vals.crit;
+  tr.querySelector('.del-btn').onclick = () => tr.remove();
+  document.getElementById('ordersBody').appendChild(tr);
+}
+
+function readOrders() {
+  return [...document.querySelectorAll('#ordersBody tr')].map(tr => ({
+    sku: tr.querySelector('.f-sku').value.trim(),
+    prov: tr.querySelector('.f-prov').value.trim(),
+    cat: tr.querySelector('.f-cat').value.trim() || 'General',
+    crit: tr.querySelector('.f-crit').value,
+    pedida: parseFloat(tr.querySelector('.f-pedida').value),
+    recibida: parseFloat(tr.querySelector('.f-recibida').value),
+    fcomp: tr.querySelector('.f-fcomp').value,
+    freal: tr.querySelector('.f-freal').value,
+  })).filter(r => r.sku);
+}
+
+function calcKpis() {
+  const rows = readOrders();
+  const resultsEl = document.getElementById('kpiResults');
+  if (!rows.length) {
+    resultsEl.innerHTML = '<p class="empty-state">Agrega al menos un pedido con SKU para calcular.</p>';
+    return;
+  }
+
+  const bySku = {};
+  rows.forEach(r => {
+    if (!bySku[r.sku]) bySku[r.sku] = { prov: r.prov, cat: r.cat, crit: r.crit, rows: [], provInconsistente: false };
+    if (bySku[r.sku].prov && r.prov && bySku[r.sku].prov !== r.prov) bySku[r.sku].provInconsistente = true;
+    bySku[r.sku].rows.push(r);
+  });
+
+  const outRows = [];
+  const csvRows = [['SKU', 'Categoria', 'Proveedor', 'Critico', 'OTIF', 'Forecast Accuracy', 'Backorders', 'Supplier OTD']];
+  let anyIncomplete = false;
+  let anyInconsistente = false;
+
+  Object.entries(bySku).forEach(([sku, g]) => {
+    const total = g.rows.length;
+    const conFechaReal = g.rows.filter(r => r.freal);
+    const otifOk = conFechaReal.filter(r => r.freal <= r.fcomp && (r.recibida || 0) >= (r.pedida || 0));
+    const otdOk = conFechaReal.filter(r => r.freal <= r.fcomp);
+    const backorderLines = g.rows.filter(r => (r.recibida || 0) < (r.pedida || 0));
+
+    const otif = conFechaReal.length ? otifOk.length / conFechaReal.length : null;
+    const otd = conFechaReal.length ? otdOk.length / conFechaReal.length : null;
+    const backorders = total ? backorderLines.length / total : null;
+    const excluidos = total - conFechaReal.length;
+    if (excluidos > 0) anyIncomplete = true;
+    if (g.provInconsistente) anyInconsistente = true;
+
+    outRows.push({ sku, cat: g.cat, prov: g.prov, crit: g.crit, otif, otd, backorders, total, excluidos, provInconsistente: g.provInconsistente });
+    csvRows.push([
+      sku, g.cat, g.prov, g.crit,
+      otif == null ? '' : otif.toFixed(4),
+      'Pendiente',
+      backorders == null ? '' : backorders.toFixed(4),
+      otd == null ? '' : otd.toFixed(4),
+    ]);
+  });
+
+  const pill = (v, goodIsHigh) => {
+    if (v == null) return '<span class="pill nd">N/D</span>';
+    const good = goodIsHigh ? v >= 0.95 : v <= 0.05;
+    const warnZone = goodIsHigh ? v >= 0.85 : v <= 0.10;
+    const cls = good ? 'good' : (warnZone ? 'warn' : 'bad');
+    return `<span class="pill ${cls}">${pctFmt(v)}</span>`;
+  };
+
+  let html = '<h3>Resultado por SKU</h3>';
+  html += '<div class="table-scroll"><table class="out-table"><thead><tr>' +
+    '<th>SKU</th><th>Categoría</th><th>Proveedor</th><th>Crítico</th><th>OTIF</th><th>Backorders</th><th>Supplier OTD</th><th>Pedidos usados</th>' +
+    '</tr></thead><tbody>';
+  outRows.forEach(r => {
+    html += `<tr>
+      <td>${r.sku}</td><td>${r.cat}</td><td>${r.prov}${r.provInconsistente ? ' ⚠️' : ''}</td><td>${r.crit}</td>
+      <td>${pill(r.otif, true)}</td><td>${pill(r.backorders, false)}</td><td>${pill(r.otd, true)}</td>
+      <td>${r.total - r.excluidos} / ${r.total}${r.excluidos ? ` (${r.excluidos} sin fecha real, excluidos de OTIF/OTD)` : ''}</td>
+    </tr>`;
+  });
+  html += '</tbody></table></div>';
+
+  html += '<p class="note">Forecast Accuracy queda como "Pendiente" — para eso usa la calculadora de forecast más abajo.</p>';
+  if (anyIncomplete) html += '<p class="note warn">Algunos pedidos no tienen fecha real de entrega y se excluyeron de OTIF/Supplier OTD para no inventar un resultado. Complétalas si quieres un cálculo más preciso.</p>';
+  if (anyInconsistente) html += '<p class="note warn">⚠️ Hay SKU con más de un Proveedor distinto entre sus pedidos — se usó el primero ingresado. Revisa si es un error de tipeo.</p>';
+
+  html += '<div class="toolbar">' +
+    '<button class="btn btn-ghost btn-sm" id="copyKpiCsv">Copiar como CSV</button>' +
+    '<button class="btn btn-primary btn-sm" id="downloadKpiCsv">Descargar CSV</button>' +
+    '</div>' +
+    '<p class="note">Pega este CSV directo en tu Google Sheet (Archivo &gt; Importar) siguiendo la <a href="/#como-funciona">guía del dashboard</a>.</p>';
+
+  resultsEl.innerHTML = html;
+
+  const csvText = csvRows.map(r => r.map(csvEscape).join(',')).join('\n');
+  document.getElementById('copyKpiCsv').onclick = (e) => copyText(csvText, e.target);
+  document.getElementById('downloadKpiCsv').onclick = () => downloadCsv('kpis_calculados.csv', csvRows);
+}
+
+/* ---------- Tabla de demanda (Forecast Starter) ---------- */
+function addDemandRow(vals) {
+  vals = vals || {};
+  const tr = el('tr');
+  tr.innerHTML = `
+    <td><input type="text" class="d-sku" placeholder="Ej: SKU-002" value="${vals.sku || ''}"></td>
+    <td><input type="text" class="d-periodo" placeholder="Semana 1" value="${vals.periodo || ''}"></td>
+    <td><input type="number" class="d-demanda" min="0" placeholder="0" value="${vals.demanda || ''}"></td>
+    <td class="del"><button class="del-btn" title="Eliminar período">✕</button></td>
+  `;
+  tr.querySelector('.del-btn').onclick = () => tr.remove();
+  document.getElementById('demandBody').appendChild(tr);
+}
+
+function readDemand() {
+  return [...document.querySelectorAll('#demandBody tr')].map(tr => ({
+    sku: tr.querySelector('.d-sku').value.trim(),
+    periodo: tr.querySelector('.d-periodo').value.trim(),
+    demanda: parseFloat(tr.querySelector('.d-demanda').value),
+  })).filter(r => r.sku && !isNaN(r.demanda));
+}
+
+function calcForecast() {
+  const rows = readDemand();
+  const N = parseInt(document.getElementById('windowN').value, 10);
+  const resultsEl = document.getElementById('forecastResults');
+  if (!rows.length) {
+    resultsEl.innerHTML = '<p class="empty-state">Agrega al menos un período con demanda real para calcular.</p>';
+    return;
+  }
+
+  const bySku = {};
+  rows.forEach(r => { (bySku[r.sku] = bySku[r.sku] || []).push(r); });
+
+  let html = '';
+  const csvRows = [['SKU', 'Periodo', 'Demanda Real', 'Forecast']];
+
+  Object.entries(bySku).forEach(([sku, list]) => {
+    list.forEach(r => csvRows.push([sku, r.periodo, r.demanda, '']));
+    const usados = list.slice(-N);
+    const avg = usados.reduce((s, r) => s + r.demanda, 0) / usados.length;
+    csvRows.push([sku, 'Próximo período', '', avg.toFixed(1)]);
+
+    html += `<div class="forecast-card">
+      <h4>${sku}</h4>
+      <div class="big">${avg.toFixed(1)} unidades</div>
+      <p>Forecast sugerido para el próximo período — promedio de los últimos ${usados.length} período(s) que ingresaste (${usados.map(r => r.periodo || '(sin nombre)').join(', ')}).</p>
+    </div>`;
+  });
+
+  html += '<p class="note">Cuando termine ese próximo período, anota la demanda real que tuviste y calcula: <b>Forecast Accuracy = 1 − |Forecast − Demanda real| / Demanda real</b>. Repite esto por unas semanas y ya vas a tener un Forecast Accuracy real para llevar al dashboard.</p>';
+
+  html += '<div class="toolbar">' +
+    '<button class="btn btn-ghost btn-sm" id="copyFcCsv">Copiar plantilla de seguimiento</button>' +
+    '<button class="btn btn-primary btn-sm" id="downloadFcCsv">Descargar plantilla</button>' +
+    '</div>';
+
+  resultsEl.innerHTML = html;
+
+  const csvText = csvRows.map(r => r.map(csvEscape).join(',')).join('\n');
+  document.getElementById('copyFcCsv').onclick = (e) => copyText(csvText, e.target);
+  document.getElementById('downloadFcCsv').onclick = () => downloadCsv('seguimiento_forecast.csv', csvRows);
+}
+
+/* ---------- Init ---------- */
+document.getElementById('addOrderRow').onclick = () => addOrderRow();
+document.getElementById('calcKpis').onclick = calcKpis;
+document.getElementById('addDemandRow').onclick = () => addDemandRow();
+document.getElementById('calcForecast').onclick = calcForecast;
+
+// Filas de ejemplo para que se entienda el formato de inmediato
+addOrderRow({ sku: 'SKU-001', prov: 'Proveedor A', cat: 'Electronica', crit: 'Si', pedida: 100, recibida: 90, fcomp: '2026-07-01', freal: '2026-07-03' });
+addOrderRow({ sku: 'SKU-001', prov: 'Proveedor A', cat: 'Electronica', crit: 'Si', pedida: 80, recibida: 80, fcomp: '2026-07-10', freal: '2026-07-10' });
+addOrderRow();
+
+addDemandRow({ sku: 'SKU-001', periodo: 'Semana 1', demanda: 220 });
+addDemandRow({ sku: 'SKU-001', periodo: 'Semana 2', demanda: 245 });
+addDemandRow({ sku: 'SKU-001', periodo: 'Semana 3', demanda: 210 });
+addDemandRow({ sku: 'SKU-001', periodo: 'Semana 4', demanda: 260 });
+addDemandRow();
+</script>
+</body>
+</html>
